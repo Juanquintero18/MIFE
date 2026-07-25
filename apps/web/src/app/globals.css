@@ -1,0 +1,122 @@
+@import "tailwindcss";
+
+:root {
+  --mife-blue: #1f3e98;
+  --mife-electric: #16c2f0;
+  --mife-ink: #25262c;
+  --mife-muted: #7e8799;
+  --mife-bg: #eef2fa;
+  --mife-surface: #ffffff;
+  --mife-line: #d8e1f6;
+}
+
+@theme inline {
+  --color-background: var(--mife-bg);
+  --color-foreground: var(--mife-ink);
+  --font-sans: var(--font-body);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: var(--font-body), sans-serif;
+  color: var(--mife-ink);
+  background:
+    radial-gradient(circle at 12% -10%, rgba(22, 194, 240, 0.22), transparent 40%),
+    radial-gradient(circle at 88% 0%, rgba(31, 62, 152, 0.18), transparent 45%),
+    var(--mife-bg);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display), sans-serif;
+  letter-spacing: -0.02em;
+}
+
+.mife-grid {
+  background-image:
+    linear-gradient(rgba(31, 62, 152, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(31, 62, 152, 0.06) 1px, transparent 1px);
+  background-size: 36px 36px;
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(31, 62, 152, 0.14);
+  backdrop-filter: blur(8px);
+}
+
+.glow-btn {
+  background: linear-gradient(130deg, var(--mife-blue), var(--mife-electric));
+  color: #ffffff;
+  box-shadow: 0 10px 30px rgba(22, 194, 240, 0.35);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.glow-btn:hover {
+  transform: translateY(-2px);
+  filter: saturate(1.08);
+  box-shadow: 0 14px 34px rgba(22, 194, 240, 0.4);
+}
+
+.outline-btn {
+  border: 1px solid var(--mife-line);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--mife-ink);
+  transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.outline-btn:hover {
+  transform: translateY(-2px);
+  border-color: var(--mife-blue);
+  background: #ffffff;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.reveal {
+  animation: rise 0.8s ease both;
+}
+
+.reveal-delay-1 {
+  animation-delay: 0.12s;
+}
+
+.reveal-delay-2 {
+  animation-delay: 0.24s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal,
+  .reveal-delay-1,
+  .reveal-delay-2 {
+    animation: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .mife-grid {
+    background-size: 28px 28px;
+  }
+}
