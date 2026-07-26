@@ -50,8 +50,78 @@ const mapsOpenUrl = `https://www.google.com/maps/search/?api=1&query=${mapsQuery
 // URL para abrir Google Maps directamente en modo de rutas.
 const mapsDirectionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${mapsQuery}`;
 
+const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
+
+type CatalogStatus = "draft" | "published";
+type MediaType = "image" | "video";
+
+interface CatalogMedia {
+  id: string;
+  type: MediaType;
+  url: string;
+  originalName: string;
+  mimeType: string;
+  sizeBytes: number;
+  createdAt: string;
+}
+
+interface CatalogProduct {
+  id: string;
+  name: string;
+  description: string;
+  priceCop: number;
+  status: CatalogStatus;
+  media: CatalogMedia[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+function mediaUrl(url: string): string {
+  if (url.startsWith("http://") || url.startsWith("https://")) {
+    return url;
+  }
+
+  return `${apiBaseUrl}${url}`;
+}
+
+function formatMoneyCop(value: number): string {
+  return new Intl.NumberFormat("es-CO", {
+    style: "currency",
+    currency: "COP",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+async function fetchPublishedCatalog(): Promise<CatalogProduct[]> {
+  try {
+    const response = await fetch(`${apiBaseUrl}/api/catalog/products`, {
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const payload = (await response.json()) as {
+      ok: boolean;
+      products?: CatalogProduct[];
+    };
+
+    if (!payload.ok || !payload.products) {
+      return [];
+    }
+
+    return payload.products;
+  } catch {
+    // Si la API esta apagada, el sitio sigue respondiendo con catalogo vacio.
+    return [];
+  }
+}
+
 // Componente principal de la pagina de inicio de MIFE.
-export default function Home() {
+export default async function Home() {
+  const catalogProducts = await fetchPublishedCatalog();
+
   // Estructura general de la pagina: header, contenido principal y footer.
   return (
     <div className="mife-grid min-h-screen text-[var(--mife-ink)]">
@@ -88,6 +158,9 @@ export default function Home() {
             </a>
             <a href="#contacto" className="hover:text-[var(--mife-blue)]">
               Contacto
+            </a>
+            <a href="/admin" className="hover:text-[var(--mife-blue)]">
+              Panel admin
             </a>
           </nav>
         </div>
@@ -234,18 +307,61 @@ export default function Home() {
               <article className="rounded-3xl border border-[var(--mife-line)] bg-white p-7 shadow-sm">
                 <h3 className="text-2xl font-semibold">Catalogo</h3>
                 <p className="mt-3 text-sm leading-7 text-[var(--mife-muted)]">
-                  Estructura lista para publicar productos ya desarrollados.
+                  Productos publicados desde el panel administrador.
                 </p>
 
-                {/* Lista de campos sugeridos para cada producto del catalogo. */}
-                <ul className="mt-5 space-y-2 text-sm">
-                  <li>Imagen</li>
-                  <li>Nombre</li>
-                  <li>Descripcion</li>
-                  <li>Tecnologias utilizadas</li>
-                  <li>Estado</li>
-                  <li>Boton para solicitar informacion</li>
-                </ul>
+                {catalogProducts.length === 0 ? (
+                  <p className="mt-5 rounded-xl bg-[var(--mife-bg)] p-4 text-sm text-[var(--mife-muted)]">
+                    Aun no hay productos publicados. Pronto veras aqui el
+                    catalogo oficial de MIFE.
+                  </p>
+                ) : (
+                  <div className="mt-5 grid gap-4">
+                    {catalogProducts.map((product) => {
+                      const mainMedia = product.media[0];
+
+                      return (
+                        <article
+                          key={product.id}
+                          className="glass-card rounded-2xl p-4"
+                        >
+                          {mainMedia ? (
+                            mainMedia.type === "image" ? (
+                              <Image
+                                src={mediaUrl(mainMedia.url)}
+                                alt={product.name}
+                                width={640}
+                                height={360}
+                                unoptimized
+                                className="h-44 w-full rounded-xl object-cover"
+                              />
+                            ) : (
+                              <video
+                                src={mediaUrl(mainMedia.url)}
+                                controls
+                                className="h-44 w-full rounded-xl object-cover"
+                              />
+                            )
+                          ) : (
+                            <div className="flex h-44 items-center justify-center rounded-xl bg-[var(--mife-bg)] text-sm text-[var(--mife-muted)]">
+                              Sin multimedia
+                            </div>
+                          )}
+
+                          <h4 className="mt-3 text-lg font-semibold">{product.name}</h4>
+
+                          <p className="mt-2 text-sm leading-7 text-[var(--mife-muted)]">
+                            {product.description}
+                          </p>
+
+                          <p className="mt-3 text-sm font-semibold text-[var(--mife-blue)]">
+                            {formatMoneyCop(product.priceCop)}
+                          </p>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
               </article>
 
               {/* Bloque para recibir solicitudes de proyectos a medida. */}
