@@ -1,7 +1,8 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 type CatalogStatus = "draft" | "published";
 type MediaType = "image" | "video";
@@ -90,7 +91,13 @@ function emptyDraft(): ProductDraft {
 }
 
 export default function AdminPage() {
-  const [token, setToken] = useState("");
+  const [token, setToken] = useState(() => {
+    if (typeof window === "undefined") {
+      return "";
+    }
+
+    return localStorage.getItem(LOCAL_STORAGE_TOKEN_KEY) ?? "";
+  });
   const [products, setProducts] = useState<CatalogProduct[]>([]);
   const [drafts, setDrafts] = useState<Record<string, ProductDraft>>({});
   const [selectedFiles, setSelectedFiles] = useState<Record<string, File[]>>({});
@@ -104,68 +111,26 @@ export default function AdminPage() {
   // Formulario principal para crear producto.
   const [newProduct, setNewProduct] = useState<ProductDraft>(emptyDraft());
 
-  const canUseAdminActions = token.trim().length > 0;
+  const trimmedToken = token.trim();
+  const canUseAdminActions = trimmedToken.length > 0;
+  const visibleProducts = canUseAdminActions ? products : [];
 
-  const headers = useMemo(() => {
-    const currentToken = token.trim();
-
-    if (!currentToken) {
-      return undefined;
-    }
-
-    return {
-      "x-admin-token": currentToken,
-    };
-  }, [token]);
-
-  useEffect(() => {
-    const stored = localStorage.getItem(LOCAL_STORAGE_TOKEN_KEY) ?? "";
-    setToken(stored);
-  }, []);
-
-  useEffect(() => {
-    // Carga limites publicos del backend para mostrarlos en pantalla.
-    const loadLimits = async () => {
-      try {
-        const response = await fetch(`${API_BASE_URL}/api/catalog/config`, {
-          cache: "no-store",
-        });
-
-        if (!response.ok) {
-          return;
-        }
-
-        const payload = (await response.json()) as {
-          ok: boolean;
-          limits?: CatalogLimits;
-        };
-
-        if (payload.ok && payload.limits) {
-          setLimits(payload.limits);
-        }
-      } catch {
-        // Si falla, solo ocultamos la tarjeta de limites.
+  const headers = canUseAdminActions
+    ? {
+        "x-admin-token": trimmedToken,
       }
+    : undefined;
+
+  async function fetchProducts(overrideToken?: string): Promise<void> {
+    const tokenForRequest = (overrideToken ?? token).trim();
+
+    if (!tokenForRequest) {
+      return;
+    }
+
+    const requestHeaders = {
+      "x-admin-token": tokenForRequest,
     };
-
-    void loadLimits();
-  }, []);
-
-  useEffect(() => {
-    if (!canUseAdminActions) {
-      setProducts([]);
-      setDrafts({});
-      return;
-    }
-
-    void fetchProducts();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canUseAdminActions, headers]);
-
-  const fetchProducts = async () => {
-    if (!headers) {
-      return;
-    }
 
     setLoadingProducts(true);
     setError("");
@@ -173,7 +138,7 @@ export default function AdminPage() {
     try {
       const response = await fetch(`${API_BASE_URL}/api/admin/catalog/products`, {
         method: "GET",
-        headers,
+        headers: requestHeaders,
         cache: "no-store",
       });
 
@@ -211,7 +176,35 @@ export default function AdminPage() {
     } finally {
       setLoadingProducts(false);
     }
-  };
+  }
+
+  useEffect(() => {
+    // Carga limites publicos del backend para mostrarlos en pantalla.
+    const loadLimits = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/catalog/config`, {
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = (await response.json()) as {
+          ok: boolean;
+          limits?: CatalogLimits;
+        };
+
+        if (payload.ok && payload.limits) {
+          setLimits(payload.limits);
+        }
+      } catch {
+        // Si falla, solo ocultamos la tarjeta de limites.
+      }
+    };
+
+    void loadLimits();
+  }, []);
 
   const saveToken = () => {
     const trimmed = token.trim();
@@ -219,6 +212,10 @@ export default function AdminPage() {
     setToken(trimmed);
     setMessage("Token guardado en este navegador.");
     setError("");
+
+    if (trimmed) {
+      void fetchProducts(trimmed);
+    }
   };
 
   const clearToken = () => {
@@ -647,14 +644,14 @@ export default function AdminPage() {
             </p>
           ) : null}
 
-          {canUseAdminActions && products.length === 0 ? (
+          {canUseAdminActions && visibleProducts.length === 0 ? (
             <p className="mt-4 text-sm text-[var(--mife-muted)]">
               No hay productos todavia.
             </p>
           ) : null}
 
           <div className="mt-6 grid gap-6">
-            {products.map((product) => {
+            {visibleProducts.map((product) => {
               const draft = drafts[product.id] ?? emptyDraft();
               const currentFiles = selectedFiles[product.id] ?? [];
 
@@ -786,9 +783,12 @@ export default function AdminPage() {
                             className="rounded-xl border border-[var(--mife-line)] bg-white p-3"
                           >
                             {media.type === "image" ? (
-                              <img
+                              <Image
                                 src={src}
                                 alt={media.originalName}
+                                width={480}
+                                height={240}
+                                unoptimized
                                 className="h-36 w-full rounded-lg object-cover"
                               />
                             ) : (
