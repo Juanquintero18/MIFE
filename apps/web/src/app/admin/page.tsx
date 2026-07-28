@@ -1,93 +1,28 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 
-type CatalogStatus = "draft" | "published";
-type MediaType = "image" | "video";
+import {
+  createAdminProduct,
+  deleteAdminProduct,
+  deleteAdminProductMedia,
+  fetchAdminProducts,
+  fetchCatalogLimits,
+  updateAdminProduct,
+  uploadAdminProductMedia,
+} from "./api";
+import { ProductEditorCard } from "./components/ProductEditorCard";
+import { ACCEPTED_MEDIA, LOCAL_STORAGE_TOKEN_KEY } from "./constants";
+import type { CatalogLimits, CatalogProduct, ProductDraft } from "./types";
+import { buildDraftMap, emptyDraft, formatBytes } from "./utils";
 
-interface CatalogMedia {
-  id: string;
-  type: MediaType;
-  url: string;
-  originalName: string;
-  mimeType: string;
-  sizeBytes: number;
-  createdAt: string;
-}
-
-interface CatalogProduct {
-  id: string;
-  name: string;
-  description: string;
-  priceCop: number;
-  status: CatalogStatus;
-  media: CatalogMedia[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface CatalogLimits {
-  maxImagesPerProduct: number;
-  maxVideosPerProduct: number;
-  maxImageSizeBytes: number;
-  maxVideoSizeBytes: number;
-  maxTotalBytesPerProduct: number;
-  allowedImageTypes: string[];
-  allowedVideoTypes: string[];
-}
-
-interface ProductDraft {
-  name: string;
-  description: string;
-  priceCop: string;
-  status: CatalogStatus;
-}
-
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
-const LOCAL_STORAGE_TOKEN_KEY = "mife_admin_token";
-const ACCEPTED_MEDIA =
-  "image/jpeg,image/jpg,image/png,image/webp,video/mp4,video/webm";
-
-function formatMoneyCop(value: number): string {
-  return new Intl.NumberFormat("es-CO", {
-    style: "currency",
-    currency: "COP",
-    maximumFractionDigits: 0,
-  }).format(value);
-}
-
-function formatBytes(value: number): string {
-  if (value < 1024) {
-    return `${value} B`;
+function toErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error) {
+    return error.message;
   }
 
-  const kb = value / 1024;
-  if (kb < 1024) {
-    return `${kb.toFixed(1)} KB`;
-  }
-
-  const mb = kb / 1024;
-  return `${mb.toFixed(1)} MB`;
-}
-
-function resolveMediaUrl(url: string): string {
-  if (url.startsWith("http://") || url.startsWith("https://")) {
-    return url;
-  }
-
-  return `${API_BASE_URL}${url}`;
-}
-
-function emptyDraft(): ProductDraft {
-  return {
-    name: "",
-    description: "",
-    priceCop: "",
-    status: "draft",
-  };
+  return fallback;
 }
 
 export default function AdminPage() {
@@ -115,92 +50,32 @@ export default function AdminPage() {
   const canUseAdminActions = trimmedToken.length > 0;
   const visibleProducts = canUseAdminActions ? products : [];
 
-  const headers = canUseAdminActions
-    ? {
-        "x-admin-token": trimmedToken,
-      }
-    : undefined;
-
-  async function fetchProducts(overrideToken?: string): Promise<void> {
+  async function loadProducts(overrideToken?: string): Promise<void> {
     const tokenForRequest = (overrideToken ?? token).trim();
 
     if (!tokenForRequest) {
       return;
     }
 
-    const requestHeaders = {
-      "x-admin-token": tokenForRequest,
-    };
-
     setLoadingProducts(true);
     setError("");
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/admin/catalog/products`, {
-        method: "GET",
-        headers: requestHeaders,
-        cache: "no-store",
-      });
-
-      const payload = (await response.json()) as {
-        ok: boolean;
-        message?: string;
-        products?: CatalogProduct[];
-      };
-
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.message ?? "No se pudo cargar el catalogo");
-      }
-
-      const allProducts = payload.products ?? [];
+      const allProducts = await fetchAdminProducts(tokenForRequest);
       setProducts(allProducts);
-
-      const draftMap: Record<string, ProductDraft> = {};
-      for (const product of allProducts) {
-        draftMap[product.id] = {
-          name: product.name,
-          description: product.description,
-          priceCop: String(product.priceCop),
-          status: product.status,
-        };
-      }
-
-      setDrafts(draftMap);
+      setDrafts(buildDraftMap(allProducts));
       setMessage("Catalogo cargado correctamente.");
     } catch (fetchError) {
-      const fetchMessage =
-        fetchError instanceof Error
-          ? fetchError.message
-          : "Error al consultar productos";
-      setError(fetchMessage);
+      setError(toErrorMessage(fetchError, "Error al consultar productos"));
     } finally {
       setLoadingProducts(false);
     }
   }
 
   useEffect(() => {
-    // Carga limites publicos del backend para mostrarlos en pantalla.
     const loadLimits = async () => {
-      try {
-        const response = await fetch(`${API_BASE_URL}/api/catalog/config`, {
-          cache: "no-store",
-        });
-
-        if (!response.ok) {
-          return;
-        }
-
-        const payload = (await response.json()) as {
-          ok: boolean;
-          limits?: CatalogLimits;
-        };
-
-        if (payload.ok && payload.limits) {
-          setLimits(payload.limits);
-        }
-      } catch {
-        // Si falla, solo ocultamos la tarjeta de limites.
-      }
+      const loadedLimits = await fetchCatalogLimits();
+      setLimits(loadedLimits);
     };
 
     void loadLimits();
@@ -214,7 +89,7 @@ export default function AdminPage() {
     setError("");
 
     if (trimmed) {
-      void fetchProducts(trimmed);
+      void loadProducts(trimmed);
     }
   };
 
@@ -231,7 +106,7 @@ export default function AdminPage() {
   const handleCreateProduct = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!headers) {
+    if (!canUseAdminActions) {
       setError("Primero debes ingresar el token de administrador.");
       return;
     }
@@ -240,37 +115,17 @@ export default function AdminPage() {
     setError("");
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/admin/catalog/products`, {
-        method: "POST",
-        headers: {
-          ...headers,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name: newProduct.name,
-          description: newProduct.description,
-          priceCop: Number(newProduct.priceCop),
-        }),
+      await createAdminProduct(trimmedToken, {
+        name: newProduct.name,
+        description: newProduct.description,
+        priceCop: Number(newProduct.priceCop),
       });
-
-      const payload = (await response.json()) as {
-        ok: boolean;
-        message?: string;
-      };
-
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.message ?? "No se pudo crear el producto");
-      }
 
       setNewProduct(emptyDraft());
       setMessage("Producto creado en borrador.");
-      await fetchProducts();
+      await loadProducts();
     } catch (createError) {
-      const createMessage =
-        createError instanceof Error
-          ? createError.message
-          : "Error al crear producto";
-      setError(createMessage);
+      setError(toErrorMessage(createError, "Error al crear producto"));
     } finally {
       setCreating(false);
     }
@@ -291,7 +146,7 @@ export default function AdminPage() {
   };
 
   const saveProduct = async (productId: string) => {
-    if (!headers) {
+    if (!canUseAdminActions) {
       setError("Primero debes ingresar el token de administrador.");
       return;
     }
@@ -304,45 +159,22 @@ export default function AdminPage() {
     setError("");
 
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/admin/catalog/products/${productId}`,
-        {
-          method: "PUT",
-          headers: {
-            ...headers,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            name: draft.name,
-            description: draft.description,
-            priceCop: Number(draft.priceCop),
-            status: draft.status,
-          }),
-        },
-      );
-
-      const payload = (await response.json()) as {
-        ok: boolean;
-        message?: string;
-      };
-
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.message ?? "No se pudo actualizar el producto");
-      }
+      await updateAdminProduct(trimmedToken, productId, {
+        name: draft.name,
+        description: draft.description,
+        priceCop: Number(draft.priceCop),
+        status: draft.status,
+      });
 
       setMessage("Producto actualizado.");
-      await fetchProducts();
+      await loadProducts();
     } catch (updateError) {
-      const updateMessage =
-        updateError instanceof Error
-          ? updateError.message
-          : "Error al actualizar producto";
-      setError(updateMessage);
+      setError(toErrorMessage(updateError, "Error al actualizar producto"));
     }
   };
 
   const deleteProduct = async (productId: string) => {
-    if (!headers) {
+    if (!canUseAdminActions) {
       setError("Primero debes ingresar el token de administrador.");
       return;
     }
@@ -358,31 +190,12 @@ export default function AdminPage() {
     setError("");
 
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/admin/catalog/products/${productId}`,
-        {
-          method: "DELETE",
-          headers,
-        },
-      );
-
-      const payload = (await response.json()) as {
-        ok: boolean;
-        message?: string;
-      };
-
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.message ?? "No se pudo eliminar el producto");
-      }
+      await deleteAdminProduct(trimmedToken, productId);
 
       setMessage("Producto eliminado.");
-      await fetchProducts();
+      await loadProducts();
     } catch (deleteError) {
-      const deleteMessage =
-        deleteError instanceof Error
-          ? deleteError.message
-          : "Error al eliminar producto";
-      setError(deleteMessage);
+      setError(toErrorMessage(deleteError, "Error al eliminar producto"));
     }
   };
 
@@ -396,7 +209,7 @@ export default function AdminPage() {
   };
 
   const uploadMedia = async (productId: string) => {
-    if (!headers) {
+    if (!canUseAdminActions) {
       setError("Primero debes ingresar el token de administrador.");
       return;
     }
@@ -408,31 +221,10 @@ export default function AdminPage() {
       return;
     }
 
-    const formData = new FormData();
-    for (const file of files) {
-      formData.append("media", file);
-    }
-
     setError("");
 
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/admin/catalog/products/${productId}/media`,
-        {
-          method: "POST",
-          headers,
-          body: formData,
-        },
-      );
-
-      const payload = (await response.json()) as {
-        ok: boolean;
-        message?: string;
-      };
-
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.message ?? "No se pudo subir la multimedia");
-      }
+      await uploadAdminProductMedia(trimmedToken, productId, files);
 
       setSelectedFiles((previous) => ({
         ...previous,
@@ -440,49 +232,42 @@ export default function AdminPage() {
       }));
 
       setMessage("Archivos subidos correctamente.");
-      await fetchProducts();
+      await loadProducts();
     } catch (uploadError) {
-      const uploadMessage =
-        uploadError instanceof Error
-          ? uploadError.message
-          : "Error al subir archivos";
-      setError(uploadMessage);
+      setError(toErrorMessage(uploadError, "Error al subir archivos"));
     }
   };
 
   const deleteMedia = async (productId: string, mediaId: string) => {
-    if (!headers) {
+    if (!canUseAdminActions) {
       setError("Primero debes ingresar el token de administrador.");
       return;
     }
 
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/admin/catalog/products/${productId}/media/${mediaId}`,
-        {
-          method: "DELETE",
-          headers,
-        },
-      );
-
-      const payload = (await response.json()) as {
-        ok: boolean;
-        message?: string;
-      };
-
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.message ?? "No se pudo eliminar el archivo");
-      }
+      await deleteAdminProductMedia(trimmedToken, productId, mediaId);
 
       setMessage("Archivo eliminado.");
-      await fetchProducts();
+      await loadProducts();
     } catch (mediaError) {
-      const mediaMessage =
-        mediaError instanceof Error
-          ? mediaError.message
-          : "Error al eliminar archivo";
-      setError(mediaMessage);
+      setError(toErrorMessage(mediaError, "Error al eliminar archivo"));
     }
+  };
+
+  const handleSaveProduct = (productId: string) => {
+    void saveProduct(productId);
+  };
+
+  const handleDeleteProduct = (productId: string) => {
+    void deleteProduct(productId);
+  };
+
+  const handleUploadMedia = (productId: string) => {
+    void uploadMedia(productId);
+  };
+
+  const handleDeleteMedia = (productId: string, mediaId: string) => {
+    void deleteMedia(productId, mediaId);
   };
 
   return (
@@ -630,7 +415,7 @@ export default function AdminPage() {
             <h2 className="text-xl font-semibold">Productos del catalogo</h2>
             <button
               type="button"
-              onClick={() => void fetchProducts()}
+              onClick={() => void loadProducts()}
               disabled={!canUseAdminActions || loadingProducts}
               className="outline-btn rounded-xl px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -652,173 +437,20 @@ export default function AdminPage() {
 
           <div className="mt-6 grid gap-6">
             {visibleProducts.map((product) => {
-              const draft = drafts[product.id] ?? emptyDraft();
-              const currentFiles = selectedFiles[product.id] ?? [];
-
               return (
-                <article
+                <ProductEditorCard
                   key={product.id}
-                  className="rounded-2xl border border-[var(--mife-line)] p-5"
-                >
-                  <div className="grid gap-3">
-                    <input
-                      type="text"
-                      value={draft.name}
-                      onChange={(event) =>
-                        updateProductField(product.id, "name", event.target.value)
-                      }
-                      className="rounded-xl border border-[var(--mife-line)] px-4 py-3 text-sm outline-none focus:border-[var(--mife-blue)]"
-                    />
-
-                    <textarea
-                      value={draft.description}
-                      rows={3}
-                      onChange={(event) =>
-                        updateProductField(
-                          product.id,
-                          "description",
-                          event.target.value,
-                        )
-                      }
-                      className="rounded-xl border border-[var(--mife-line)] px-4 py-3 text-sm outline-none focus:border-[var(--mife-blue)]"
-                    />
-
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <input
-                        type="number"
-                        min={0}
-                        step={1000}
-                        value={draft.priceCop}
-                        onChange={(event) =>
-                          updateProductField(product.id, "priceCop", event.target.value)
-                        }
-                        className="rounded-xl border border-[var(--mife-line)] px-4 py-3 text-sm outline-none focus:border-[var(--mife-blue)]"
-                      />
-
-                      <select
-                        value={draft.status}
-                        onChange={(event) =>
-                          updateProductField(product.id, "status", event.target.value)
-                        }
-                        className="rounded-xl border border-[var(--mife-line)] px-4 py-3 text-sm outline-none focus:border-[var(--mife-blue)]"
-                      >
-                        <option value="draft">Borrador</option>
-                        <option value="published">Publicado</option>
-                      </select>
-                    </div>
-
-                    <div className="flex flex-wrap gap-3">
-                      <button
-                        type="button"
-                        onClick={() => void saveProduct(product.id)}
-                        className="glow-btn rounded-xl px-5 py-3 text-sm font-semibold"
-                      >
-                        Guardar cambios
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => void deleteProduct(product.id)}
-                        className="rounded-xl border border-red-300 bg-red-50 px-5 py-3 text-sm font-semibold text-red-700"
-                      >
-                        Eliminar producto
-                      </button>
-                    </div>
-
-                    <div className="rounded-xl border border-[var(--mife-line)] bg-[var(--mife-bg)] p-4">
-                      <p className="text-sm font-semibold">Subir fotos y videos</p>
-                      <p className="mt-1 text-xs text-[var(--mife-muted)]">
-                        Puedes seleccionar varios archivos a la vez desde tu
-                        computador.
-                      </p>
-
-                      <input
-                        type="file"
-                        multiple
-                        accept={ACCEPTED_MEDIA}
-                        onChange={(event) =>
-                          onFilesSelected(product.id, event.target.files)
-                        }
-                        className="mt-3 block w-full text-sm"
-                      />
-
-                      {currentFiles.length > 0 ? (
-                        <p className="mt-2 text-xs text-[var(--mife-muted)]">
-                          {currentFiles.length} archivo(s) listo(s) para subir.
-                        </p>
-                      ) : null}
-
-                      <button
-                        type="button"
-                        onClick={() => void uploadMedia(product.id)}
-                        disabled={currentFiles.length === 0}
-                        className="mt-3 rounded-xl border border-[var(--mife-blue)] px-4 py-2 text-sm font-semibold text-[var(--mife-blue)] disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        Subir seleccion
-                      </button>
-                    </div>
-
-                    <div>
-                      <p className="text-sm font-semibold">
-                        Estado: {product.status === "published" ? "Publicado" : "Borrador"}
-                      </p>
-                      <p className="mt-1 text-sm text-[var(--mife-muted)]">
-                        Precio actual: {formatMoneyCop(product.priceCop)}
-                      </p>
-                    </div>
-
-                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                      {product.media.length === 0 ? (
-                        <p className="text-sm text-[var(--mife-muted)]">
-                          Este producto aun no tiene archivos.
-                        </p>
-                      ) : null}
-
-                      {product.media.map((media) => {
-                        const src = resolveMediaUrl(media.url);
-
-                        return (
-                          <div
-                            key={media.id}
-                            className="rounded-xl border border-[var(--mife-line)] bg-white p-3"
-                          >
-                            {media.type === "image" ? (
-                              <Image
-                                src={src}
-                                alt={media.originalName}
-                                width={480}
-                                height={240}
-                                unoptimized
-                                className="h-36 w-full rounded-lg object-cover"
-                              />
-                            ) : (
-                              <video
-                                src={src}
-                                controls
-                                className="h-36 w-full rounded-lg object-cover"
-                              />
-                            )}
-
-                            <p className="mt-2 line-clamp-1 text-xs text-[var(--mife-muted)]">
-                              {media.originalName}
-                            </p>
-                            <p className="mt-1 text-xs text-[var(--mife-muted)]">
-                              {formatBytes(media.sizeBytes)}
-                            </p>
-
-                            <button
-                              type="button"
-                              onClick={() => void deleteMedia(product.id, media.id)}
-                              className="mt-2 w-full rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700"
-                            >
-                              Eliminar archivo
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </article>
+                  product={product}
+                  draft={drafts[product.id] ?? emptyDraft()}
+                  currentFiles={selectedFiles[product.id] ?? []}
+                  acceptedMedia={ACCEPTED_MEDIA}
+                  onChangeField={updateProductField}
+                  onSaveProduct={handleSaveProduct}
+                  onDeleteProduct={handleDeleteProduct}
+                  onSelectFiles={onFilesSelected}
+                  onUploadMedia={handleUploadMedia}
+                  onDeleteMedia={handleDeleteMedia}
+                />
               );
             })}
           </div>
