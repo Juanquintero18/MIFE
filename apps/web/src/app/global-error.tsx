@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 
+//esto hace que se capture y maneje cualquier error global en el enrutador de la aplicación
 type GlobalErrorProps = {
   error: Error & { digest?: string };
   reset: () => void;
