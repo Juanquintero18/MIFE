@@ -8,6 +8,8 @@ type GlobalErrorProps = {
   reset: () => void;
 };
 
+//esto hace que se muestre un mensaje amigable al usuario cuando ocurre un error global
+
 export default function GlobalError({ error, reset }: GlobalErrorProps) {
   useEffect(() => {
     console.error("Error global en app router:", error);
