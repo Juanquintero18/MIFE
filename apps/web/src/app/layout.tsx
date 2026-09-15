@@ -1,6 +1,10 @@
+
+
 import type { Metadata } from "next";
 import { IBM_Plex_Sans, Space_Grotesk } from "next/font/google";
 import "./globals.css";
+
+//estas constantes definen las fuentes tipográficas que se usarán en toda la aplicación
 
 const spaceGrotesk = Space_Grotesk({
   variable: "--font-display",
@@ -20,6 +24,7 @@ export const metadata: Metadata = {
     "Soluciones electronicas, sistemas embebidos, automatizacion y domotica para Colombia.",
 };
 
+//esto hace que se aplique la tipografía global y el diseño base a toda la aplicación
 export default function RootLayout({
   children,
 }: Readonly<{

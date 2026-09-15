@@ -15,6 +15,7 @@ export default function GlobalError({ error, reset }: GlobalErrorProps) {
     console.error("Error global en app router:", error);
   }, [error]);
 
+  // esto hace que se muestre el mensaje de error global al usuario
   return (
     <html lang="es-CO">
       <body>
